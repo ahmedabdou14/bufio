@@ -617,63 +617,63 @@ func TestWriter(t *testing.T) {
 			// Check that the right amount makes it out
 			// and that the data is correct.
 
-			w.Reset()
+				w.Reset()
 			buf := NewWriterSize(w, bs)
-			context := fmt.Sprintf("nwrite=%d bufsize=%d", nwrite, bs)
-			n, e1 := buf.Write(data[0:nwrite])
-			if e1 != nil || n != nwrite {
-				t.Errorf("%s: buf.Write %d = %d, %v", context, nwrite, n, e1)
-				continue
-			}
-			if e := buf.Flush(); e != nil {
-				t.Errorf("%s: buf.Flush = %v", context, e)
-			}
+				context := fmt.Sprintf("nwrite=%d bufsize=%d", nwrite, bs)
+				n, e1 := buf.Write(data[0:nwrite])
+				if e1 != nil || n != nwrite {
+					t.Errorf("%s: buf.Write %d = %d, %v", context, nwrite, n, e1)
+					continue
+				}
+				if e := buf.Flush(); e != nil {
+					t.Errorf("%s: buf.Flush = %v", context, e)
+				}
 
-			written := w.Bytes()
-			if len(written) != nwrite {
-				t.Errorf("%s: %d bytes written", context, len(written))
-			}
-			for l := 0; l < len(written); l++ {
-				if written[l] != data[l] {
-					t.Errorf("wrong bytes written")
-					t.Errorf("want=%q", data[:len(written)])
-					t.Errorf("have=%q", written)
+				written := w.Bytes()
+				if len(written) != nwrite {
+					t.Errorf("%s: %d bytes written", context, len(written))
+				}
+				for l := 0; l < len(written); l++ {
+					if written[l] != data[l] {
+						t.Errorf("wrong bytes written")
+						t.Errorf("want=%q", data[:len(written)])
+						t.Errorf("have=%q", written)
+					}
 				}
 			}
 		}
 	}
-}
 
 func TestWriterAppend(t *testing.T) {
 	got := new(bytes.Buffer)
 	var want []byte
 	rn := rand.New(rand.NewSource(0))
 	w := NewWriterSize(got, 64)
-	for i := 0; i < 100; i++ {
-		// Obtain a buffer to append to.
-		b := w.AvailableBuffer()
-		if w.Available() != cap(b) {
-			t.Fatalf("Available() = %v, want %v", w.Available(), cap(b))
+		for i := 0; i < 100; i++ {
+			// Obtain a buffer to append to.
+			b := w.AvailableBuffer()
+			if w.Available() != cap(b) {
+				t.Fatalf("Available() = %v, want %v", w.Available(), cap(b))
+			}
+
+			// While not recommended, it is valid to append to a shifted buffer.
+			// This forces Write to copy the input.
+			if rn.Intn(8) == 0 && cap(b) > 0 {
+				b = b[1:1:cap(b)]
+			}
+
+			// Append a random integer of varying width.
+			n := int64(rn.Intn(1 << rn.Intn(30)))
+			want = append(strconv.AppendInt(want, n, 10), ' ')
+			b = append(strconv.AppendInt(b, n, 10), ' ')
+			w.Write(b)
 		}
+		w.Flush()
 
-		// While not recommended, it is valid to append to a shifted buffer.
-		// This forces Write to copy the input.
-		if rn.Intn(8) == 0 && cap(b) > 0 {
-			b = b[1:1:cap(b)]
+		if !bytes.Equal(got.Bytes(), want) {
+			t.Errorf("output mismatch:\ngot  %s\nwant %s", got.Bytes(), want)
 		}
-
-		// Append a random integer of varying width.
-		n := int64(rn.Intn(1 << rn.Intn(30)))
-		want = append(strconv.AppendInt(want, n, 10), ' ')
-		b = append(strconv.AppendInt(b, n, 10), ' ')
-		w.Write(b)
 	}
-	w.Flush()
-
-	if !bytes.Equal(got.Bytes(), want) {
-		t.Errorf("output mismatch:\ngot  %s\nwant %s", got.Bytes(), want)
-	}
-}
 
 // Check that write errors are returned properly.
 
@@ -744,21 +744,36 @@ func TestNewWriterSizeIdempotent(t *testing.T) {
 	}
 }
 
+func TestNewWriterBufferIdempotent(t *testing.T) {
+	const BufSize = 1000
+	b := NewWriterBuffer(new(bytes.Buffer), make([]byte, BufSize))
+	// Does it recognize itself?
+	b1 := NewWriterBuffer(b, make([]byte, BufSize))
+	if b1 != b {
+		t.Error("NewWriterBuffer did not detect underlying Writer")
+	}
+	// Does it wrap if existing buffer is too small?
+	b2 := NewWriterBuffer(b, make([]byte, 2*BufSize))
+	if b2 == b {
+		t.Error("NewWriterBuffer did not enlarge buffer")
+	}
+}
+
 func TestWriteString(t *testing.T) {
 	const BufSize = 8
 	buf := new(strings.Builder)
 	b := NewWriterSize(buf, BufSize)
-	b.WriteString("0")                         // easy
-	b.WriteString("123456")                    // still easy
-	b.WriteString("7890")                      // easy after flush
-	b.WriteString("abcdefghijklmnopqrstuvwxy") // hard
-	b.WriteString("z")
-	if err := b.Flush(); err != nil {
-		t.Error("WriteString", err)
-	}
-	s := "01234567890abcdefghijklmnopqrstuvwxyz"
-	if buf.String() != s {
-		t.Errorf("WriteString wants %q gets %q", s, buf.String())
+		b.WriteString("0")                         // easy
+		b.WriteString("123456")                    // still easy
+		b.WriteString("7890")                      // easy after flush
+		b.WriteString("abcdefghijklmnopqrstuvwxy") // hard
+		b.WriteString("z")
+		if err := b.Flush(); err != nil {
+			t.Error("WriteString", err)
+		}
+		s := "01234567890abcdefghijklmnopqrstuvwxyz"
+		if buf.String() != s {
+			t.Errorf("WriteString wants %q gets %q", s, buf.String())
 	}
 }
 
@@ -1703,6 +1718,22 @@ func TestWriterSize(t *testing.T) {
 	}
 	if got, want := NewWriterSize(nil, 1234).Size(), 1234; got != want {
 		t.Errorf("NewWriterSize's Writer.Size = %d; want %d", got, want)
+	}
+}
+
+func TestWriterBuffer(t *testing.T) {
+	if got, want := NewWriterBuffer(nil, nil).Size(), DefaultBufSize; got != want {
+		t.Errorf("NewWriterBuffer's Writer.Size = %d; want %d", got, want)
+	}
+
+	buf := make([]byte, 0, 3)
+	if got, want := NewWriterBuffer(nil, buf).Size(), 3; got != want {
+		t.Errorf("NewWriterBuffer's Writer.Size = %d; want %d", got, want)
+	}
+
+	buf = []byte("foo")
+	if got, want := NewWriterBuffer(nil, buf).Size(), len(buf); got != want {
+		t.Errorf("NewWriterBuffer's Writer.Size = %d; want %d", got, want)
 	}
 }
 

@@ -580,6 +580,27 @@ type Writer struct {
 	wr  io.Writer
 }
 
+// NewWriterBuffer returns a new [Writer] with the specific buffer.
+// The buffer should not be modified nor used after passing it to the [Writer].
+func NewWriterBuffer(w io.Writer, buf []byte) *Writer {
+	// Is it already a Writer?
+	b, ok := w.(*Writer)
+	if ok && len(b.buf) >= len(buf) {
+		return b
+	}
+	// Is the buffer nil?
+	if cap(buf) == 0 {
+		buf = make([]byte, defaultBufSize)
+	}
+	if len(buf) == 0 {
+		buf = make([]byte, cap(buf))
+	}
+	return &Writer{
+		buf: buf,
+		wr:  w,
+	}
+}
+
 // NewWriterSize returns a new [Writer] whose buffer has at least the specified
 // size. If the argument io.Writer is already a [Writer] with large enough
 // size, it returns the underlying [Writer].
